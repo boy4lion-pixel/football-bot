@@ -1,7 +1,5 @@
 import requests
 import time
-import json
-import os
 from datetime import datetime
 
 # ===== НАЛАШТУВАННЯ =====
@@ -10,49 +8,26 @@ CHAT_ID = "439583139"
 RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 CHECK_INTERVAL = 120  # перевірка кожні 2 хвилини
 
-# ===== ЛІГИ ДЛЯ МОНІТОРИНГУ =====
-# FlashScore tournament IDs
-LEAGUES = {
-    # Топ-5
-    "Premier League": "p7oD2Wgf",
-    "La Liga": "U1oAP5ib",
-    "Serie A": "LrEMWu4s",
-    "Bundesliga": "tdAuM98B",
-    "Ligue 1": "GJb0MYQB",
-    # Єврокубки
-    "Champions League": "jNxIrNBo",
-    "Europa League": "cDi5YOXE",
-    "Conference League": "IT4JQKEN",
-    # Інші топ-ліги
-    "Eredivisie": "McRHlDl3",
-    "Primeira Liga": "kwkOqVMp",
-    "Super Lig": "oRFB0HFQ",
-    "Belgian Pro League": "jzLK2NpQ",
-    "Scottish Premiership": "FvuSPCji",
-    "Greek Super League": "W7bLLIWf",
-    "UPL": "DFbBiGxA",
-}
-
 # ===== ТРИГЕРИ =====
 TRIGGER_HT_GOALS = 2       # мінімум голів у 1-му таймі
 TRIGGER_TOTAL_GOALS = 5    # мінімум загальних голів
 TRIGGER_MAX_MINUTE = 80    # до якої хвилини спрацьовує тригер
 
+# ===== АКТИВНИЙ ЧАС =====
+ACTIVE_HOUR_START = 12
+ACTIVE_HOUR_END = 22
+
 # ===== СТАН =====
-alerted_matches = set()  # щоб не дублювати сповіщення
+alerted_matches = set()
 
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
         r = requests.post(url, data=data, timeout=10)
         if r.status_code == 200:
-            print(f"✅ Telegram надіслано")
+            print("✅ Telegram надіслано")
         else:
             print(f"❌ Telegram помилка: {r.text}")
     except Exception as e:
@@ -66,14 +41,11 @@ def get_live_matches():
         "x-rapidapi-host": "flashscore4.p.rapidapi.com",
         "Content-Type": "application/json"
     }
-    params = {
-        "sport_id": "1",
-        "timezone": "Europe/Kiev"
-    }
+    params = {"sport_id": "1", "timezone": "Europe/Kiev"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=15)
         if r.status_code == 200:
-            print(f"✅ API відповів OK")
+            print("✅ API відповів OK")
             return r.json()
         else:
             print(f"❌ API помилка: {r.status_code} - {r.text[:300]}")
@@ -83,182 +55,103 @@ def get_live_matches():
         return None
 
 
-def parse_score(score_str):
-    """Парсить рахунок типу '3 - 2' або '3:2'"""
-    try:
-        score_str = score_str.replace(" ", "").replace("-", ":")
-        parts = score_str.split(":")
-        return int(parts[0]), int(parts[1])
-    except:
-        return 0, 0
-
-
 def check_matches(data):
     if not data:
         return
 
-    matches = []
+    # Структура: список турнірів, кожен має matches: []
+    total_matches = 0
+    for tournament_block in data:
+        tournament_name = tournament_block.get("name", "")
+        matches = tournament_block.get("matches", [])
+        total_matches += len(matches)
 
-    # Пробуємо різні структури відповіді FlashScore API
-    if isinstance(data, dict):
-        matches = data.get("data", data.get("matches", data.get("events", [])))
-    elif isinstance(data, list):
-        matches = data
+        for match in matches:
+            try:
+                process_match(match, tournament_name)
+            except Exception as e:
+                print(f"⚠️ Помилка: {e}")
 
-    if not matches:
-        print(f"ℹ️ Немає live матчів або невідома структура даних")
-        print(f"Ключі відповіді: {list(data.keys()) if isinstance(data, dict) else 'list'}")
-        return
-
-    print(f"📊 Знайдено {len(matches)} live матчів")
-
-    for match in matches:
-        try:
-            process_match(match)
-        except Exception as e:
-            print(f"⚠️ Помилка обробки матчу: {e}")
+    print(f"📊 Перевірено {total_matches} матчів у {len(data)} турнірах")
 
 
-def process_match(match):
-    # FlashScore може повертати різні структури — пробуємо обидва варіанти
-    match_id = match.get("id") or match.get("match_id") or match.get("eventId", "unknown")
-
-    # Назва турніру
-    tournament = (
-        match.get("tournament", {}).get("name") or
-        match.get("league", {}).get("name") or
-        match.get("tournamentName") or
-        match.get("competition", {}).get("name") or
-        ""
-    )
-
-    # Перевіряємо чи ліга в нашому списку
-    league_match = any(
-        league_name.lower() in tournament.lower()
-        for league_name in LEAGUES.keys()
-    )
-    if not league_match:
-        return
+def process_match(match, tournament_name):
+    match_id = match.get("match_id", "unknown")
 
     # Команди
-    home = (
-        match.get("homeTeam", {}).get("name") or
-        match.get("home_team") or
-        match.get("homeName") or
-        "Господарі"
-    )
-    away = (
-        match.get("awayTeam", {}).get("name") or
-        match.get("away_team") or
-        match.get("awayName") or
-        "Гості"
-    )
+    home = match.get("home_name", "Господарі")
+    away = match.get("away_name", "Гості")
 
-    # Хвилина
-    minute = (
-        match.get("minute") or
-        match.get("match_minute") or
-        match.get("time", {}).get("current") or
-        0
-    )
+    # Статус матчу
+    status = match.get("match_status", {})
+    stage = status.get("stage", "")
+    minute = status.get("current_minutes", 0)
     try:
-        minute = int(str(minute).replace("'", "").replace("+", ""))
+        minute = int(str(minute).replace("'", "").replace("+", "").split("+")[0])
     except:
         minute = 0
 
-    # Рахунок
-    home_score = (
-        match.get("homeScore", {}).get("current") or
-        match.get("score", {}).get("home") or
-        match.get("homeGoals") or
-        0
-    )
-    away_score = (
-        match.get("awayScore", {}).get("current") or
-        match.get("score", {}).get("away") or
-        match.get("awayGoals") or
-        0
-    )
-    try:
-        home_score = int(home_score)
-        away_score = int(away_score)
-    except:
-        home_score = away_score = 0
+    # Тільки 2-й тайм і до TRIGGER_MAX_MINUTE хвилини
+    if stage != "2nd Half" or minute > TRIGGER_MAX_MINUTE:
+        return
 
-    # Рахунок першого тайму
-    ht_home = (
-        match.get("homeScore", {}).get("halfTime") or
-        match.get("score", {}).get("ht_home") or
-        match.get("htScore", "0-0").split("-")[0] if isinstance(match.get("htScore"), str) else 0
-    )
-    ht_away = (
-        match.get("awayScore", {}).get("halfTime") or
-        match.get("score", {}).get("ht_away") or
-        match.get("htScore", "0-0").split("-")[1] if isinstance(match.get("htScore"), str) else 0
-    )
-    try:
-        ht_home = int(ht_home)
-        ht_away = int(ht_away)
-    except:
-        ht_home = ht_away = 0
+    # Рахунок
+    scores = match.get("scores", {})
+    home_score = int(scores.get("home_score", 0) or 0)
+    away_score = int(scores.get("away_score", 0) or 0)
+    ht_home = int(scores.get("ht_home_score", 0) or 0)
+    ht_away = int(scores.get("ht_away_score", 0) or 0)
 
     total_goals = home_score + away_score
     ht_goals = ht_home + ht_away
 
-    # Логуємо матч
-    print(f"  🔍 {tournament}: {home} {home_score}-{away_score} {away} | {minute}' | HT: {ht_home}-{ht_away}")
-
-    # Тільки другий тайм і до 80 хвилини
-    if minute < 46 or minute > TRIGGER_MAX_MINUTE:
-        return
+    print(f"  🔍 {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}' | HT: {ht_home}-{ht_away}")
 
     # Перевіряємо тригери
-    trigger_ht = ht_goals >= TRIGGER_HT_GOALS
-    trigger_total = total_goals >= TRIGGER_TOTAL_GOALS
-
-    if trigger_ht and trigger_total:
+    if ht_goals >= TRIGGER_HT_GOALS and total_goals >= TRIGGER_TOTAL_GOALS:
         alert_key = f"{match_id}_{total_goals}"
         if alert_key not in alerted_matches:
             alerted_matches.add(alert_key)
-            send_alert(tournament, home, away, home_score, away_score, ht_home, ht_away, minute, total_goals, ht_goals)
-
-
-def send_alert(tournament, home, away, home_score, away_score, ht_home, ht_away, minute, total_goals, ht_goals):
-    message = (
-        f"⚽ <b>АЛЕРТ!</b>\n"
-        f"🏆 {tournament}\n"
-        f"<b>{home} {home_score} - {away_score} {away}</b>\n"
-        f"🕐 Хвилина: {minute}'\n"
-        f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
-        f"📈 Всього голів: {total_goals}\n"
-        f"✅ Тригер спрацював!"
-    )
-    print(f"\n🚨 АЛЕРТ: {home} {home_score}-{away_score} {away} | {minute}' | Голи: {total_goals}\n")
-    send_telegram(message)
+            message = (
+                f"⚽ <b>АЛЕРТ!</b>\n"
+                f"🏆 {tournament_name}\n"
+                f"<b>{home} {home_score} - {away_score} {away}</b>\n"
+                f"🕐 Хвилина: {minute}'\n"
+                f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
+                f"📈 Всього голів: {total_goals}\n"
+                f"✅ Тригер спрацював!"
+            )
+            print(f"\n🚨 АЛЕРТ: {home} {home_score}-{away_score} {away} | {minute}' | Голи: {total_goals}\n")
+            send_telegram(message)
 
 
 def main():
     print("🤖 Football Alert Bot запущено!")
     print(f"⚙️ Тригери: {TRIGGER_HT_GOALS}+ голів у 1-му таймі, {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}'")
-    print(f"⏱️ Перевірка кожні {CHECK_INTERVAL} секунд\n")
+    print(f"⏱️ Активний час: {ACTIVE_HOUR_START}:00 - {ACTIVE_HOUR_END}:00\n")
 
     send_telegram(
         f"🤖 <b>Football Alert Bot запущено!</b>\n"
         f"Тригери:\n"
-        f"• {TRIGGER_HT_GOALS}+ голів у 1-му таймі\n"
-        f"• {TRIGGER_TOTAL_GOALS}+ загальних голів до {TRIGGER_MAX_MINUTE}'\n"
-        f"Перевірка кожні {CHECK_INTERVAL//60} хвилини"
+        f"- {TRIGGER_HT_GOALS}+ голів у 1-му таймі\n"
+        f"- {TRIGGER_TOTAL_GOALS}+ загальних голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"Активний: {ACTIVE_HOUR_START}:00 - {ACTIVE_HOUR_END}:00"
     )
 
     while True:
-        now = datetime.now().strftime("%H:%M:%S")
-        print(f"\n⏰ [{now}] Перевіряю матчі...")
+        now = datetime.now()
+        hour = now.hour
+        time_str = now.strftime("%H:%M:%S")
 
-        data = get_live_matches()
-        check_matches(data)
-
-        print(f"💤 Чекаю {CHECK_INTERVAL} секунд...")
-        time.sleep(CHECK_INTERVAL)
+        if ACTIVE_HOUR_START <= hour < ACTIVE_HOUR_END:
+            print(f"\n⏰ [{time_str}] Перевіряю матчі...")
+            data = get_live_matches()
+            check_matches(data)
+            print(f"💤 Чекаю {CHECK_INTERVAL} секунд...")
+            time.sleep(CHECK_INTERVAL)
+        else:
+            print(f"😴 [{time_str}] Нічний режим, сплю до {ACTIVE_HOUR_START}:00...")
+            time.sleep(600)
 
 
 if __name__ == "__main__":
