@@ -18,7 +18,8 @@ ACTIVE_HOUR_START = 7   # 10:00 Київ
 ACTIVE_HOUR_END = 20    # 23:00 Київ
 
 # ===== СТАН =====
-alerted_matches = set()
+alerted_ht = set()       # матчі де вже надіслали алерт 1-го тайму
+alerted_trigger = set()  # матчі де вже надіслали фінальний алерт
 
 HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
@@ -81,29 +82,15 @@ def get_match_stats(match_id):
 
 
 def parse_ht_score(details):
-    """Витягує рахунок першого тайму з деталей матчу"""
     if not details:
         return None, None
     try:
-        # Шукаємо в різних місцях структури
         if isinstance(details, dict):
             scores = details.get("scores", {})
             ht_home = scores.get("ht_home", scores.get("halftime_home", None))
             ht_away = scores.get("ht_away", scores.get("halftime_away", None))
             if ht_home is not None:
                 return int(ht_home), int(ht_away)
-
-            # Шукаємо в events
-            events = details.get("events", [])
-            if events:
-                ht_home = ht_away = 0
-                for ev in events:
-                    if ev.get("period") == 1 and ev.get("type") in ["goal", "own_goal"]:
-                        if ev.get("team") == "home":
-                            ht_home += 1
-                        else:
-                            ht_away += 1
-                return ht_home, ht_away
     except:
         pass
     return None, None
@@ -156,12 +143,9 @@ def check_matches(data):
 
 def process_match(match, tournament_name):
     match_id = match.get("match_id", "unknown")
-
-    # Команди — правильна структура
     home = match.get("home_team", {}).get("name", "Господарі")
     away = match.get("away_team", {}).get("name", "Гості")
 
-    # Статус і хвилина
     status = match.get("match_status", {})
     stage = status.get("stage", "")
     minute_raw = status.get("live_time", "0")
@@ -174,61 +158,81 @@ def process_match(match, tournament_name):
     except:
         minute = 0
 
-    # Тільки 2-й тайм і до TRIGGER_MAX_MINUTE хвилини
-    if stage != "2nd Half" or minute > TRIGGER_MAX_MINUTE:
-        return
-
-    # Рахунок
     scores = match.get("scores", {})
     home_score = int(scores.get("home", 0) or 0)
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
-    print(f"  🔍 {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}'")
+    # ===== АЛЕРТ 1: 1-й тайм, 2+ голів =====
+    if stage == "1st Half" and total_goals >= TRIGGER_HT_GOALS:
+        ht_key = f"{match_id}_ht_{total_goals}"
+        if ht_key not in alerted_ht:
+            alerted_ht.add(ht_key)
+            print(f"  👀 1-й тайм алерт: {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}'")
 
-    # Швидка перевірка загальних голів
+            stats_data = get_match_stats(match_id)
+            xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = parse_stats(stats_data)
+
+            msg = (
+                f"👀 <b>СТЕЖИ ЗА МАТЧЕМ!</b>\n"
+                f"🏆 {tournament_name}\n"
+                f"<b>{home} {home_score} - {away_score} {away}</b>\n"
+                f"🕐 Хвилина: {minute}'\n"
+                f"⚡ Вже {total_goals} голів у 1-му таймі!\n"
+            )
+            if xg_h is not None:
+                msg += f"{'━'*10}\n📐 xG: {xg_h} - {xg_a}\n"
+            if sh_h is not None:
+                msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
+            if pos_h is not None:
+                msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
+
+            send_telegram(msg)
+        return
+
+    # ===== АЛЕРТ 2: 2-й тайм, 5+ загальних =====
+    if stage != "2nd Half" or minute > TRIGGER_MAX_MINUTE:
+        return
+
     if total_goals < TRIGGER_TOTAL_GOALS:
         return
 
-    # Отримуємо деталі для HT рахунку
+    print(f"  🔍 2-й тайм кандидат: {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}'")
+
+    # Перевіряємо HT рахунок
     details = get_match_details(match_id)
     ht_home, ht_away = parse_ht_score(details)
 
     if ht_home is None:
-        print(f"  ⚠️ Не вдалось отримати HT рахунок для {match_id}")
+        print(f"  ⚠️ Не вдалось отримати HT рахунок")
         return
 
     ht_goals = ht_home + ht_away
-
     if ht_goals < TRIGGER_HT_GOALS:
         return
 
-    # Тригер спрацював!
     alert_key = f"{match_id}_{total_goals}"
-    if alert_key not in alerted_matches:
-        alerted_matches.add(alert_key)
+    if alert_key not in alerted_trigger:
+        alerted_trigger.add(alert_key)
 
-        # Отримуємо статистику
         stats_data = get_match_stats(match_id)
         xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = parse_stats(stats_data)
 
         msg = (
-            f"⚽ <b>АЛЕРТ!</b>\n"
+            f"⚽ <b>АЛЕРТ! ТРИГЕР!</b>\n"
             f"🏆 {tournament_name}\n"
             f"<b>{home} {home_score} - {away_score} {away}</b>\n"
             f"🕐 Хвилина: {minute}'\n"
             f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
             f"📈 Всього голів: {total_goals}\n"
-            f"{'━' * 10}\n"
+            f"{'━'*10}\n"
         )
-
         if xg_h is not None:
             msg += f"📐 xG: {xg_h} - {xg_a}\n"
         if sh_h is not None:
             msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
         if pos_h is not None:
             msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
-
         msg += f"✅ Тригер спрацював!"
 
         print(f"\n🚨 АЛЕРТ: {home} {home_score}-{away_score} {away} | {minute}' | HT: {ht_home}-{ht_away}\n")
@@ -242,9 +246,9 @@ def main():
 
     send_telegram(
         f"🤖 <b>Football Alert Bot запущено!</b>\n"
-        f"Тригери:\n"
-        f"- {TRIGGER_HT_GOALS}+ голів у 1-му таймі\n"
-        f"- {TRIGGER_TOTAL_GOALS}+ загальних голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"Алерти:\n"
+        f"- 👀 {TRIGGER_HT_GOALS}+ голів у 1-му таймі — стежи!\n"
+        f"- ⚽ {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}' — тригер!\n"
         f"Активний: 10:00 - 23:00 (Київ)"
     )
 
