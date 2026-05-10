@@ -17,15 +17,40 @@ TRIGGER_MAX_MINUTE = 80
 ACTIVE_HOUR_START = 7   # 10:00 Київ
 ACTIVE_HOUR_END = 20    # 23:00 Київ
 
+# ===== ЧОРНИЙ СПИСОК =====
+BLOCKED_COUNTRIES = [
+    "mongolia", "russia", "bangladesh", "myanmar", "gambia",
+    "burkina faso", "burundi", "malawi", "mali", "tanzania",
+    "zambia", "zimbabwe", "ethiopia", "ghana", "ivory coast",
+    "cote d'ivoire", "kuwait", "iraq",
+]
+
+BLOCKED_KEYWORDS = [
+    "women", "жінки", "female", "ladies",
+    "reserve", "reserves", "резерв", "дублери", "dublery",
+    "u19", "u21", "u23", "youth",
+]
+
 # ===== СТАН =====
-alerted_ht = set()       # матчі де вже надіслали алерт 1-го тайму
-alerted_trigger = set()  # матчі де вже надіслали фінальний алерт
+alerted_ht = set()
+alerted_trigger = set()
 
 HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
     "x-rapidapi-host": "flashscore4.p.rapidapi.com",
     "Content-Type": "application/json"
 }
+
+
+def is_allowed_league(tournament_name):
+    name_lower = tournament_name.lower()
+    for country in BLOCKED_COUNTRIES:
+        if country in name_lower:
+            return False
+    for keyword in BLOCKED_KEYWORDS:
+        if keyword in name_lower:
+            return False
+    return True
 
 
 def send_telegram(message):
@@ -127,18 +152,23 @@ def check_matches(data):
         return
 
     total_matches = 0
+    filtered_matches = 0
     for tournament_block in data:
         tournament_name = tournament_block.get("name", "")
         matches = tournament_block.get("matches", [])
         total_matches += len(matches)
 
+        if not is_allowed_league(tournament_name):
+            continue
+
+        filtered_matches += len(matches)
         for match in matches:
             try:
                 process_match(match, tournament_name)
             except Exception as e:
                 print(f"⚠️ Помилка: {e}")
 
-    print(f"📊 Перевірено {total_matches} матчів у {len(data)} турнірах")
+    print(f"📊 Перевірено {filtered_matches} матчів з дозволених ліг (всього {total_matches})")
 
 
 def process_match(match, tournament_name):
@@ -199,7 +229,6 @@ def process_match(match, tournament_name):
 
     print(f"  🔍 2-й тайм кандидат: {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}'")
 
-    # Перевіряємо HT рахунок
     details = get_match_details(match_id)
     ht_home, ht_away = parse_ht_score(details)
 
@@ -240,12 +269,12 @@ def process_match(match, tournament_name):
 
 
 def main():
-    print("🤖 Football Alert Bot запущено!")
+    print("🤖 Football Alert Bot v6 запущено!")
     print(f"⚙️ Тригери: {TRIGGER_HT_GOALS}+ голів у 1-му таймі, {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}'")
     print(f"⏱️ Активний час: 10:00 - 23:00 (Київ)\n")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot запущено!</b>\n"
+        f"🤖 <b>Football Alert Bot v6!</b>\n"
         f"Алерти:\n"
         f"- 👀 {TRIGGER_HT_GOALS}+ голів у 1-му таймі — стежи!\n"
         f"- ⚽ {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}' — тригер!\n"
