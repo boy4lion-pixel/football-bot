@@ -41,7 +41,7 @@ def get_live_matches():
         "x-rapidapi-host": "flashscore4.p.rapidapi.com",
         "Content-Type": "application/json"
     }
-    params = {"sport_id": "1", "timezone": "Europe/Kiev"}
+    params = {"sport_id": "1", "timezone": "Europe/Berlin"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=15)
         if r.status_code == 200:
