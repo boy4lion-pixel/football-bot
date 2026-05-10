@@ -14,8 +14,8 @@ TRIGGER_TOTAL_GOALS = 5    # мінімум загальних голів
 TRIGGER_MAX_MINUTE = 80    # до якої хвилини спрацьовує тригер
 
 # ===== АКТИВНИЙ ЧАС =====
-ACTIVE_HOUR_START = 12
-ACTIVE_HOUR_END = 22
+ACTIVE_HOUR_START = 7
+ACTIVE_HOUR_END = 20
 
 # ===== СТАН =====
 alerted_matches = set()
@@ -128,14 +128,14 @@ def process_match(match, tournament_name):
 def main():
     print("🤖 Football Alert Bot запущено!")
     print(f"⚙️ Тригери: {TRIGGER_HT_GOALS}+ голів у 1-му таймі, {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}'")
-    print(f"⏱️ Активний час: {ACTIVE_HOUR_START}:00 - {ACTIVE_HOUR_END}:00\n")
+    print(f"⏱️ Активний час: 10:00 - 23:00 (Київ)\n")
 
     send_telegram(
         f"🤖 <b>Football Alert Bot запущено!</b>\n"
         f"Тригери:\n"
         f"- {TRIGGER_HT_GOALS}+ голів у 1-му таймі\n"
         f"- {TRIGGER_TOTAL_GOALS}+ загальних голів до {TRIGGER_MAX_MINUTE}'\n"
-        f"Активний: {ACTIVE_HOUR_START}:00 - {ACTIVE_HOUR_END}:00"
+        f"Активний: 10:00 - 23:00 (Київ)"
     )
 
     while True:
@@ -150,7 +150,7 @@ def main():
             print(f"💤 Чекаю {CHECK_INTERVAL} секунд...")
             time.sleep(CHECK_INTERVAL)
         else:
-            print(f"😴 [{time_str}] Нічний режим, сплю до {ACTIVE_HOUR_START}:00...")
+            print(f"😴 [{time_str}] Нічний режим, сплю до 10:00 Київ...")
             time.sleep(600)
 
 
