@@ -15,7 +15,7 @@ TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
 ACTIVE_HOUR_START = 7
-ACTIVE_HOUR_END = 20
+ACTIVE_HOUR_END = 22
 
 # ===== БІЛИЙ СПИСОК ЛІГИ =====
 ALLOWED_LEAGUES = [
