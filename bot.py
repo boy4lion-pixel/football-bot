@@ -85,6 +85,7 @@ ALLOWED_LEAGUES = [
     "scotland: premier", "scotland: championship",
     "japan: j1", "japan: j2", "japan: j3",
     "usa: mls",
+    "kyrgyzstan: premier",
 ]
 
 # ===== СТАН =====
@@ -242,7 +243,9 @@ def process_match(match, tournament_name):
 
     status = match.get("match_status", {})
     stage = status.get("stage", "")
-    if stage != "2nd Half":
+
+    # Перевіряємо тільки активні матчі (1-й або 2-й тайм)
+    if stage not in ["1st Half", "2nd Half"]:
         return
 
     minute_raw = status.get("live_time", "0")
@@ -251,7 +254,10 @@ def process_match(match, tournament_name):
     except:
         minute = 0
 
-    if minute > TRIGGER_MAX_MINUTE:
+    # Для 2-го тайму додаємо 45 хвилин
+    actual_minute = minute if stage == "1st Half" else minute + 45
+
+    if actual_minute > TRIGGER_MAX_MINUTE:
         return
 
     scores = match.get("scores", {})
@@ -262,11 +268,14 @@ def process_match(match, tournament_name):
     if total_goals < TRIGGER_TOTAL_GOALS:
         return
 
-    # Перевіряємо HT
-    ht_home, ht_away = get_ht_score(match_id)
-    if ht_home is None:
-        print(f"  ⚠️ Немає HT для {home} vs {away}")
-        return
+    # Для 1-го тайму НТ = поточний рахунок
+    if stage == "1st Half":
+        ht_home, ht_away = home_score, away_score
+    else:
+        ht_home, ht_away = get_ht_score(match_id)
+        if ht_home is None:
+            print(f"  ⚠️ Немає HT для {home} vs {away}")
+            return
 
     ht_goals = ht_home + ht_away
     if ht_goals < TRIGGER_HT_GOALS:
@@ -277,7 +286,7 @@ def process_match(match, tournament_name):
         return
 
     alerted_trigger.add(alert_key)
-    print(f"\n🚨 ТРИГЕР: {tournament_name}: {home} {home_score}-{away_score} {away} | {minute}' | HT:{ht_home}-{ht_away}\n")
+    print(f"\n🚨 ТРИГЕР: {tournament_name}: {home} {home_score}-{away_score} {away} | {actual_minute}' | HT:{ht_home}-{ht_away}\n")
 
     # Збираємо всю статистику
     xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
@@ -289,7 +298,7 @@ def process_match(match, tournament_name):
         f"⚽ <b>АЛЕРТ! ТРИГЕР!</b>\n"
         f"🏆 {tournament_name}\n"
         f"<b>{home} {home_score} - {away_score} {away}</b>\n"
-        f"🕐 Хвилина: {minute}'\n"
+        f"🕐 Хвилина: {actual_minute}'\n"
         f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
         f"📈 Всього голів: {total_goals}\n"
     )
