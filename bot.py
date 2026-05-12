@@ -6,11 +6,10 @@ from datetime import datetime
 TELEGRAM_TOKEN = "8440346164:AAFZzfshhUsgN6MWbrfXQE6OXGFTKhJ6eEk"
 CHAT_ID = "439583139"
 RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
-CHECK_INTERVAL = 180  # раз в 3 хвилини
+CHECK_INTERVAL = 180
 
 # ===== ТРИГЕРИ =====
-TRIGGER_HT_GOALS = 2
-TRIGGER_TOTAL_GOALS = 4
+TRIGGER_GOALS = [4, 5, 6]  # алерт на кожен з цих порогів
 TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
@@ -23,7 +22,7 @@ ALLOWED_LEAGUES = [
     "azerbaijan: premier", "azerbaijan: 1. liga",
     "albania: superliga",
     "algeria: ligue", "algeria: division",
-    "england: premier", "england: championship", "england: fa cup",
+    "england: premier league", "england: championship", "england: fa cup",
     "argentina: primera", "argentina: nacional b", "argentina: federal",
     "belgium: jupiler", "belgium: challenger",
     "belarus: vysheyshaya", "belarus: pershaya", "belarus: first",
@@ -86,10 +85,14 @@ ALLOWED_LEAGUES = [
     "japan: j1", "japan: j2", "japan: j3",
     "usa: mls",
     "kyrgyzstan: premier",
+    "tunisia: ligue",
 ]
 
+# Слова що виключають лігу
+BLOCKED_KEYWORDS = ["u18", "u19", "u21", "u23", "youth", "reserve", "women", "дублери", "жінки"]
+
 # ===== СТАН =====
-alerted_trigger = set()
+alerted = {}  # {match_id: set of goal thresholds already alerted}
 
 HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
@@ -100,6 +103,9 @@ HEADERS = {
 
 def is_allowed_league(name):
     n = name.lower()
+    # Перевіряємо заблоковані слова
+    if any(kw in n for kw in BLOCKED_KEYWORDS):
+        return False
     return any(l in n for l in ALLOWED_LEAGUES)
 
 
@@ -124,9 +130,13 @@ def api_get(url, params):
 
 
 def get_live_matches():
-    url = "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/live"
     try:
-        r = requests.get(url, headers=HEADERS, params={"sport_id": "1", "timezone": "Europe/Berlin"}, timeout=15)
+        r = requests.get(
+            "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/live",
+            headers=HEADERS,
+            params={"sport_id": "1", "timezone": "Europe/Berlin"},
+            timeout=15
+        )
         if r.status_code == 200:
             print("✅ API OK")
             return r.json()
@@ -244,7 +254,6 @@ def process_match(match, tournament_name):
     status = match.get("match_status", {})
     stage = status.get("stage", "")
 
-    # Перевіряємо тільки активні матчі (1-й або 2-й тайм)
     if stage not in ["1st Half", "2nd Half"]:
         return
 
@@ -254,7 +263,6 @@ def process_match(match, tournament_name):
     except:
         minute = 0
 
-    # Для 2-го тайму додаємо 45 хвилин
     actual_minute = minute if stage == "1st Half" else minute + 45
 
     if actual_minute > TRIGGER_MAX_MINUTE:
@@ -265,75 +273,83 @@ def process_match(match, tournament_name):
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
-    if total_goals < TRIGGER_TOTAL_GOALS:
-        return
+    # Перевіряємо кожен поріг голів
+    for threshold in TRIGGER_GOALS:
+        if total_goals < threshold:
+            break  # якщо не досягли порогу — більші теж не досягнуті
 
-    # Для 1-го тайму НТ = поточний рахунок
-    if stage == "1st Half":
-        ht_home, ht_away = home_score, away_score
-    else:
-        ht_home, ht_away = get_ht_score(match_id)
-        if ht_home is None:
-            print(f"  ⚠️ Немає HT для {home} vs {away}")
-            return
+        alert_key = f"{match_id}_{threshold}"
+        if match_id not in alerted:
+            alerted[match_id] = set()
+        if threshold in alerted[match_id]:
+            continue  # вже надсилали
 
-    ht_goals = ht_home + ht_away
-    if ht_goals < TRIGGER_HT_GOALS:
-        return
+        alerted[match_id].add(threshold)
 
-    alert_key = f"{match_id}_{total_goals}"
-    if alert_key in alerted_trigger:
-        return
+        # Отримуємо HT рахунок
+        if stage == "1st Half":
+            ht_home, ht_away = home_score, away_score
+            ht_known = True
+        else:
+            ht_home, ht_away = get_ht_score(match_id)
+            ht_known = ht_home is not None
 
-    alerted_trigger.add(alert_key)
-    print(f"\n🚨 ТРИГЕР: {tournament_name}: {home} {home_score}-{away_score} {away} | {actual_minute}' | HT:{ht_home}-{ht_away}\n")
+        # Збираємо статистику
+        xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
+        home_max = get_team_max_goals(home_id) if home_id else None
+        away_max = get_team_max_goals(away_id) if away_id else None
+        h2h_max, h2h_score = get_h2h_max(match_id)
 
-    # Збираємо всю статистику
-    xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
-    home_max = get_team_max_goals(home_id) if home_id else None
-    away_max = get_team_max_goals(away_id) if away_id else None
-    h2h_max, h2h_score = get_h2h_max(match_id)
+        # Іконка залежно від порогу
+        icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
 
-    msg = (
-        f"⚽ <b>АЛЕРТ! ТРИГЕР!</b>\n"
-        f"🏆 {tournament_name}\n"
-        f"<b>{home} {home_score} - {away_score} {away}</b>\n"
-        f"🕐 Хвилина: {actual_minute}'\n"
-        f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
-        f"📈 Всього голів: {total_goals}\n"
-    )
-    if any(x is not None for x in [xg_h, sh_h, pos_h]):
-        msg += f"{'━'*10}\n"
-        if xg_h is not None:
-            msg += f"📐 xG: {xg_h} - {xg_a}\n"
-        if sh_h is not None:
-            msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
-        if pos_h is not None:
-            msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
-    if home_max is not None or away_max is not None:
-        msg += f"{'━'*10}\n📋 Форма (останні 5):\n"
-        if home_max is not None:
-            msg += f"  {home}: макс {home_max} голів\n"
-        if away_max is not None:
-            msg += f"  {away}: макс {away_max} голів\n"
-    if h2h_max is not None:
-        msg += f"🤝 H2H макс: {h2h_max} голів ({h2h_score})\n"
-    msg += f"✅ Тригер спрацював!"
+        msg = f"{icon} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
+        msg += f"🏆 {tournament_name}\n"
+        msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
+        msg += f"🕐 Хвилина: {actual_minute}'\n"
 
-    send_telegram(msg)
+        if ht_known:
+            ht_goals = ht_home + ht_away
+            msg += f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
+        else:
+            msg += f"📊 1-й тайм: невідомо\n"
+
+        msg += f"📈 Всього голів: {total_goals}\n"
+
+        if any(x is not None for x in [xg_h, sh_h, pos_h]):
+            msg += f"{'━'*10}\n"
+            if xg_h is not None:
+                msg += f"📐 xG: {xg_h} - {xg_a}\n"
+            if sh_h is not None:
+                msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
+            if pos_h is not None:
+                msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
+
+        if home_max is not None or away_max is not None:
+            msg += f"{'━'*10}\n📋 Форма (останні 5):\n"
+            if home_max is not None:
+                msg += f"  {home}: макс {home_max} голів\n"
+            if away_max is not None:
+                msg += f"  {away}: макс {away_max} голів\n"
+
+        if h2h_max is not None:
+            msg += f"🤝 H2H макс: {h2h_max} голів ({h2h_score})\n"
+
+        msg += f"✅ Тригер спрацював!"
+
+        print(f"\n🚨 {threshold} ГОЛІВ: {tournament_name}: {home} {home_score}-{away_score} {away} | {actual_minute}'\n")
+        send_telegram(msg)
 
 
 def main():
-    print("🤖 Football Alert Bot v9 запущено!")
-    print(f"⚙️ Тригер: {TRIGGER_HT_GOALS}+ у 1-му таймі + {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}'")
-    print(f"⏱️ Перевірка кожні {CHECK_INTERVAL//60} хв | Активний: 10:00-23:00 Київ\n")
+    print("🤖 Football Alert Bot v12 запущено!")
+    print(f"⚙️ Тригери: {TRIGGER_GOALS} голів до {TRIGGER_MAX_MINUTE}'")
+    print(f"⏱️ Активний час: 10:00-01:00 Київ\n")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot v9!</b>\n"
-        f"Тригер: {TRIGGER_HT_GOALS}+ голів у 1-му таймі\n"
-        f"+ {TRIGGER_TOTAL_GOALS}+ загальних до {TRIGGER_MAX_MINUTE}'\n"
-        f"Перевірка кожні 3 хв ⏱️\n"
-        f"Активний: 10:00-23:00 (Київ)"
+        f"🤖 <b>Football Alert Bot v12!</b>\n"
+        f"Алерти на: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"Активний: 10:00-01:00 (Київ)"
     )
 
     while True:
