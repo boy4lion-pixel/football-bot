@@ -16,15 +16,12 @@ TRIGGER_MAX_MINUTE = 75
 ACTIVE_HOUR_START = 7
 ACTIVE_HOUR_END = 22
 
-# ===== ЧОРНИЙ СПИСОК (блокуємо тільки це) =====
+# ===== БЛОКУЄМО ТІЛЬКИ ЦЕ =====
 BLOCKED_KEYWORDS = [
-    # Юнацькі
     "u16", "u17", "u18", "u19", "u20", "u21", "u23",
     "youth", "junior", "juniors", "academy",
-    # Жіночі
     "women", "woman", "ladies", "female", "girls",
-    # Дублери
-    "reserve", "reserves", "b team", "ii team",
+    "reserve", "reserves", "b team",
 ]
 
 # ===== СТАН =====
@@ -186,23 +183,24 @@ def process_match(match, tournament_name):
 
     status = match.get("match_status", {})
     stage = status.get("stage", "")
-
-    if stage not in ["1st Half", "2nd Half"]:
-        return
-
     minute_raw = status.get("live_time", "0")
+
+    # Беремо поточну хвилину
     try:
         minute = int(str(minute_raw).replace("+", "").split("+")[0])
     except:
         minute = 0
 
-    # Ігноруємо якщо хвилина 0 або 45 без прогресу (перерва/кінець тайму)
-    if minute == 0 or (stage == "1st Half" and minute >= 45):
-        return
+    # Рахуємо реальну хвилину матчу
+    if stage == "1st Half":
+        actual_minute = minute
+    elif stage == "2nd Half":
+        actual_minute = 45 + minute
+    else:
+        return  # Half Time, Full Time, Extra Time — пропускаємо
 
-    actual_minute = minute if stage == "1st Half" else minute + 45
-
-    if actual_minute > TRIGGER_MAX_MINUTE:
+    # Тільки до 75 хвилини
+    if actual_minute == 0 or actual_minute > TRIGGER_MAX_MINUTE:
         return
 
     scores = match.get("scores", {})
@@ -210,6 +208,7 @@ def process_match(match, tournament_name):
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
+    # Перевіряємо кожен поріг
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
             break
@@ -275,12 +274,11 @@ def process_match(match, tournament_name):
 
 
 def main():
-    print("🤖 Football Alert Bot v13 запущено!")
+    print("🤖 Football Alert Bot v14 запущено!")
     print(f"⚙️ Тригери: {TRIGGER_GOALS} голів до {TRIGGER_MAX_MINUTE}'")
-    print(f"⏱️ Всі ліги крім жіночих та юнацьких\n")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot v13!</b>\n"
+        f"🤖 <b>Football Alert Bot v14!</b>\n"
         f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
         f"Всі ліги крім жіночих та юнацьких\n"
         f"Активний: 10:00-01:00 (Київ)"
