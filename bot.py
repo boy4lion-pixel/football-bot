@@ -68,8 +68,22 @@ def get_live_matches():
             timeout=15
         )
         if r.status_code == 200:
+            data = r.json()
+
+            # ===== ДЕБАГ =====
+            print(f"\n🔍 RAW тип даних: {type(data)}")
+            if isinstance(data, dict):
+                print(f"🔍 RAW ключі: {list(data.keys())}")
+                print(f"🔍 RAW перші 500 символів: {str(data)[:500]}")
+            elif isinstance(data, list):
+                print(f"🔍 RAW список, {len(data)} елементів")
+                print(f"🔍 RAW перший елемент: {str(data[0])[:300] if data else 'пустий'}")
+            else:
+                print(f"🔍 RAW: {str(data)[:500]}")
+            # ===== КІНЕЦЬ ДЕБАГУ =====
+
             print("✅ API OK")
-            return r.json()
+            return data
         else:
             print(f"❌ API: {r.status_code} - {r.text[:200]}")
             return None
@@ -155,11 +169,42 @@ def get_h2h_max(match_id):
 
 def check_matches(data):
     if not data:
+        print("⚠️ data порожній, нічого перевіряти")
         return
+
+    # ===== ДЕБАГ: розбираємо структуру =====
+    if isinstance(data, dict):
+        # Можливо матчі лежать в якомусь ключі
+        possible_keys = ["matches", "data", "events", "results", "live"]
+        for key in possible_keys:
+            if key in data:
+                print(f"🔍 Знайдено ключ '{key}' в data, використовую його")
+                data = data[key]
+                break
+        else:
+            print(f"🔍 data це dict але без відомих ключів. Ключі: {list(data.keys())}")
+            return
+
+    if not isinstance(data, list):
+        print(f"⚠️ data не список і не dict з матчами: {type(data)}")
+        return
+    # ===== КІНЕЦЬ ДЕБАГУ =====
+
     total = filtered = 0
     for block in data:
-        name = block.get("name", "")
-        matches = block.get("matches", [])
+        # Блок може бути або {"name": "Liga", "matches": [...]}
+        # або просто матчем напряму
+        if isinstance(block, dict) and "matches" in block:
+            name = block.get("name", "")
+            matches = block.get("matches", [])
+        elif isinstance(block, dict) and "match_id" in block:
+            # Матч напряму без обгортки
+            name = block.get("tournament", {}).get("name", "Unknown")
+            matches = [block]
+        else:
+            print(f"🔍 Незнайома структура блоку: {str(block)[:200]}")
+            continue
+
         total += len(matches)
         if not is_allowed_league(name):
             continue
@@ -169,6 +214,7 @@ def check_matches(data):
                 process_match(match, name)
             except Exception as e:
                 print(f"⚠️ {e}")
+
     print(f"📊 {filtered} матчів (всього {total})")
 
 
@@ -185,21 +231,18 @@ def process_match(match, tournament_name):
     stage = status.get("stage", "")
     minute_raw = status.get("live_time", "0")
 
-    # Беремо поточну хвилину
     try:
         minute = int(str(minute_raw).replace("+", "").split("+")[0])
     except:
         minute = 0
 
-    # Рахуємо реальну хвилину матчу
     if stage == "1st Half":
         actual_minute = minute
     elif stage == "2nd Half":
         actual_minute = 45 + minute
     else:
-        return  # Half Time, Full Time, Extra Time — пропускаємо
+        return
 
-    # Тільки до 75 хвилини
     if actual_minute == 0 or actual_minute > TRIGGER_MAX_MINUTE:
         return
 
@@ -208,7 +251,11 @@ def process_match(match, tournament_name):
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
-    # Перевіряємо кожен поріг
+    # ===== ДЕБАГ: матчі з голами =====
+    if total_goals >= 3:
+        print(f"👀 Матч з {total_goals} голами: {home} {home_score}-{away_score} {away} | {stage} {actual_minute}'")
+    # ===== КІНЕЦЬ ДЕБАГУ =====
+
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
             break
@@ -220,7 +267,6 @@ def process_match(match, tournament_name):
 
         alerted[match_id].add(threshold)
 
-        # HT рахунок
         if stage == "1st Half":
             ht_home, ht_away = home_score, away_score
             ht_known = True
@@ -228,7 +274,6 @@ def process_match(match, tournament_name):
             ht_home, ht_away = get_ht_score(match_id)
             ht_known = ht_home is not None
 
-        # Статистика
         xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
         home_max = get_team_max_goals(home_id) if home_id else None
         away_max = get_team_max_goals(away_id) if away_id else None
@@ -274,11 +319,11 @@ def process_match(match, tournament_name):
 
 
 def main():
-    print("🤖 Football Alert Bot v14 запущено!")
+    print("🤖 Football Alert Bot v15 (debug) запущено!")
     print(f"⚙️ Тригери: {TRIGGER_GOALS} голів до {TRIGGER_MAX_MINUTE}'")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot v14!</b>\n"
+        f"🤖 <b>Football Alert Bot v15 (debug)!</b>\n"
         f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
         f"Всі ліги крім жіночих та юнацьких\n"
         f"Активний: 10:00-01:00 (Київ)"
