@@ -9,90 +9,26 @@ RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 CHECK_INTERVAL = 180
 
 # ===== ТРИГЕРИ =====
-TRIGGER_GOALS = [4, 5, 6]  # алерт на кожен з цих порогів
+TRIGGER_GOALS = [4, 5, 6]
 TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
 ACTIVE_HOUR_START = 7
 ACTIVE_HOUR_END = 22
 
-# ===== БІЛИЙ СПИСОК ЛІГИ =====
-ALLOWED_LEAGUES = [
-    "austria: bundesliga", "austria: 2. liga",
-    "azerbaijan: premier", "azerbaijan: 1. liga",
-    "albania: superliga",
-    "algeria: ligue", "algeria: division",
-    "england: premier league", "england: championship", "england: fa cup",
-    "argentina: primera", "argentina: nacional b", "argentina: federal",
-    "belgium: jupiler", "belgium: challenger",
-    "belarus: vysheyshaya", "belarus: pershaya", "belarus: first",
-    "bulgaria: first", "bulgaria: second",
-    "bosnia: premijer", "bosnia: liga",
-    "brazil: serie a", "brazil: serie b", "brazil: serie c", "brazil: serie d",
-    "armenia: premier",
-    "georgia: erovnuli",
-    "denmark: superliga", "denmark: 1st", "denmark: 2nd",
-    "estonia: meistriliiga", "estonia: esiliiga",
-    "egypt: premier",
-    "israel: premier", "israel: leumit",
-    "iraq: stars league",
-    "ireland: premier", "ireland: first",
-    "spain: laliga", "spain: segunda",
-    "italy: serie a", "italy: serie b",
-    "jordan: premier",
-    "qatar: qsl", "qatar: stars",
-    "kenya: premier", "kenya: super",
-    "china: super", "china: league one", "china: league two",
-    "cyprus: first", "cyprus: division",
-    "latvia: virsliga", "latvia: nakotnes",
-    "lithuania: a lyga", "lithuania: 1 lyga",
-    "morocco: botola",
-    "moldova: super",
-    "nigeria: premier",
-    "netherlands: eredivisie", "netherlands: eerste",
-    "germany: bundesliga", "germany: 2. bundesliga", "germany: 3. liga",
-    "norway: eliteserien", "norway: obos",
-    "uae: arabian", "uae: division",
-    "oman: professional",
-    "paraguay: primera",
-    "peru: liga 1", "peru: liga 2",
-    "south africa: premier",
-    "south korea: k league", "korea: k league",
-    "northern ireland: premier",
-    "poland: ekstraklasa", "poland: i liga", "poland: ii liga",
-    "portugal: primeira", "portugal: segunda",
-    "romania: superliga", "romania: liga 2",
-    "saudi arabia: professional", "saudi arabia: division",
-    "serbia: super",
-    "slovakia: nike liga", "slovakia: super",
-    "turkey: super lig", "turkey: 1. lig",
-    "hungary: nb i",
-    "wales: cymru",
-    "uzbekistan: super",
-    "ukraine: premier", "ukraine: persha", "ukraine: druha",
-    "uruguay: primera", "uruguay: segunda",
-    "champions league", "europa league", "conference league", "euro ", "world cup",
-    "faroe islands: premier", "faroe islands: 1. deild",
-    "finland: veikkausliiga",
-    "france: ligue 1", "france: ligue 2", "france: national",
-    "croatia: hnl", "croatia: prva",
-    "czech: first", "czech: fortuna liga", "czech: druha",
-    "chile: primera", "chile: segunda",
-    "montenegro: first",
-    "switzerland: super", "switzerland: challenge",
-    "sweden: allsvenskan", "sweden: superettan",
-    "scotland: premier", "scotland: championship",
-    "japan: j1", "japan: j2", "japan: j3",
-    "usa: mls",
-    "kyrgyzstan: premier",
-    "tunisia: ligue",
+# ===== ЧОРНИЙ СПИСОК (блокуємо тільки це) =====
+BLOCKED_KEYWORDS = [
+    # Юнацькі
+    "u16", "u17", "u18", "u19", "u20", "u21", "u23",
+    "youth", "junior", "juniors", "academy",
+    # Жіночі
+    "women", "woman", "ladies", "female", "girls",
+    # Дублери
+    "reserve", "reserves", "b team", "ii team",
 ]
 
-# Слова що виключають лігу
-BLOCKED_KEYWORDS = ["u18", "u19", "u21", "u23", "youth", "reserve", "women", "дублери", "жінки"]
-
 # ===== СТАН =====
-alerted = {}  # {match_id: set of goal thresholds already alerted}
+alerted = {}
 
 HEADERS = {
     "x-rapidapi-key": RAPIDAPI_KEY,
@@ -103,10 +39,7 @@ HEADERS = {
 
 def is_allowed_league(name):
     n = name.lower()
-    # Перевіряємо заблоковані слова
-    if any(kw in n for kw in BLOCKED_KEYWORDS):
-        return False
-    return any(l in n for l in ALLOWED_LEAGUES)
+    return not any(kw in n for kw in BLOCKED_KEYWORDS)
 
 
 def send_telegram(message):
@@ -239,7 +172,7 @@ def check_matches(data):
                 process_match(match, name)
             except Exception as e:
                 print(f"⚠️ {e}")
-    print(f"📊 {filtered} матчів з дозволених ліг (всього {total})")
+    print(f"📊 {filtered} матчів (всього {total})")
 
 
 def process_match(match, tournament_name):
@@ -263,6 +196,10 @@ def process_match(match, tournament_name):
     except:
         minute = 0
 
+    # Ігноруємо якщо хвилина 0 або 45 без прогресу (перерва/кінець тайму)
+    if minute == 0 or (stage == "1st Half" and minute >= 45):
+        return
+
     actual_minute = minute if stage == "1st Half" else minute + 45
 
     if actual_minute > TRIGGER_MAX_MINUTE:
@@ -273,20 +210,18 @@ def process_match(match, tournament_name):
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
-    # Перевіряємо кожен поріг голів
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
-            break  # якщо не досягли порогу — більші теж не досягнуті
+            break
 
-        alert_key = f"{match_id}_{threshold}"
         if match_id not in alerted:
             alerted[match_id] = set()
         if threshold in alerted[match_id]:
-            continue  # вже надсилали
+            continue
 
         alerted[match_id].add(threshold)
 
-        # Отримуємо HT рахунок
+        # HT рахунок
         if stage == "1st Half":
             ht_home, ht_away = home_score, away_score
             ht_known = True
@@ -294,13 +229,12 @@ def process_match(match, tournament_name):
             ht_home, ht_away = get_ht_score(match_id)
             ht_known = ht_home is not None
 
-        # Збираємо статистику
+        # Статистика
         xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
         home_max = get_team_max_goals(home_id) if home_id else None
         away_max = get_team_max_goals(away_id) if away_id else None
         h2h_max, h2h_score = get_h2h_max(match_id)
 
-        # Іконка залежно від порогу
         icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
 
         msg = f"{icon} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
@@ -309,8 +243,7 @@ def process_match(match, tournament_name):
         msg += f"🕐 Хвилина: {actual_minute}'\n"
 
         if ht_known:
-            ht_goals = ht_home + ht_away
-            msg += f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_goals} голів)\n"
+            msg += f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_home+ht_away} голів)\n"
         else:
             msg += f"📊 1-й тайм: невідомо\n"
 
@@ -342,13 +275,14 @@ def process_match(match, tournament_name):
 
 
 def main():
-    print("🤖 Football Alert Bot v12 запущено!")
+    print("🤖 Football Alert Bot v13 запущено!")
     print(f"⚙️ Тригери: {TRIGGER_GOALS} голів до {TRIGGER_MAX_MINUTE}'")
-    print(f"⏱️ Активний час: 10:00-01:00 Київ\n")
+    print(f"⏱️ Всі ліги крім жіночих та юнацьких\n")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot v12!</b>\n"
-        f"Алерти на: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"🤖 <b>Football Alert Bot v13!</b>\n"
+        f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"Всі ліги крім жіночих та юнацьких\n"
         f"Активний: 10:00-01:00 (Київ)"
     )
 
