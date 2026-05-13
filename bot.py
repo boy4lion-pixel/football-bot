@@ -69,19 +69,6 @@ def get_live_matches():
         )
         if r.status_code == 200:
             data = r.json()
-
-            # ===== ДЕБАГ =====
-            print(f"\n🔍 RAW тип даних: {type(data)}")
-            if isinstance(data, dict):
-                print(f"🔍 RAW ключі: {list(data.keys())}")
-                print(f"🔍 RAW перші 500 символів: {str(data)[:500]}")
-            elif isinstance(data, list):
-                print(f"🔍 RAW список, {len(data)} елементів")
-                print(f"🔍 RAW перший елемент: {str(data[0])[:300] if data else 'пустий'}")
-            else:
-                print(f"🔍 RAW: {str(data)[:500]}")
-            # ===== КІНЕЦЬ ДЕБАГУ =====
-
             print("✅ API OK")
             return data
         else:
@@ -172,13 +159,10 @@ def check_matches(data):
         print("⚠️ data порожній, нічого перевіряти")
         return
 
-    # ===== ДЕБАГ: розбираємо структуру =====
     if isinstance(data, dict):
-        # Можливо матчі лежать в якомусь ключі
         possible_keys = ["matches", "data", "events", "results", "live"]
         for key in possible_keys:
             if key in data:
-                print(f"🔍 Знайдено ключ '{key}' в data, використовую його")
                 data = data[key]
                 break
         else:
@@ -188,21 +172,16 @@ def check_matches(data):
     if not isinstance(data, list):
         print(f"⚠️ data не список і не dict з матчами: {type(data)}")
         return
-    # ===== КІНЕЦЬ ДЕБАГУ =====
 
     total = filtered = 0
     for block in data:
-        # Блок може бути або {"name": "Liga", "matches": [...]}
-        # або просто матчем напряму
         if isinstance(block, dict) and "matches" in block:
             name = block.get("name", "")
             matches = block.get("matches", [])
         elif isinstance(block, dict) and "match_id" in block:
-            # Матч напряму без обгортки
             name = block.get("tournament", {}).get("name", "Unknown")
             matches = [block]
         else:
-            print(f"🔍 Незнайома структура блоку: {str(block)[:200]}")
             continue
 
         total += len(matches)
@@ -231,6 +210,16 @@ def process_match(match, tournament_name):
     stage = status.get("stage", "")
     minute_raw = status.get("live_time", "0")
 
+    scores = match.get("scores", {})
+    home_score = int(scores.get("home", 0) or 0)
+    away_score = int(scores.get("away", 0) or 0)
+    total_goals = home_score + away_score
+
+    # ===== ДЕБАГ: логуємо всі матчі з 3+ голами =====
+    if total_goals >= 3:
+        print(f"🔎 {home} vs {away} | stage='{stage}' | minute_raw='{minute_raw}' | score={home_score}-{away_score}")
+    # ===== КІНЕЦЬ ДЕБАГУ =====
+
     try:
         minute = int(str(minute_raw).replace("+", "").split("+")[0])
     except:
@@ -245,16 +234,6 @@ def process_match(match, tournament_name):
 
     if actual_minute == 0 or actual_minute > TRIGGER_MAX_MINUTE:
         return
-
-    scores = match.get("scores", {})
-    home_score = int(scores.get("home", 0) or 0)
-    away_score = int(scores.get("away", 0) or 0)
-    total_goals = home_score + away_score
-
-    # ===== ДЕБАГ: матчі з голами =====
-    if total_goals >= 3:
-        print(f"👀 Матч з {total_goals} голами: {home} {home_score}-{away_score} {away} | {stage} {actual_minute}'")
-    # ===== КІНЕЦЬ ДЕБАГУ =====
 
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
@@ -319,11 +298,11 @@ def process_match(match, tournament_name):
 
 
 def main():
-    print("🤖 Football Alert Bot v15 (debug) запущено!")
+    print("🤖 Football Alert Bot v16 (debug) запущено!")
     print(f"⚙️ Тригери: {TRIGGER_GOALS} голів до {TRIGGER_MAX_MINUTE}'")
 
     send_telegram(
-        f"🤖 <b>Football Alert Bot v15 (debug)!</b>\n"
+        f"🤖 <b>Football Alert Bot v16 (debug)!</b>\n"
         f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
         f"Всі ліги крім жіночих та юнацьких\n"
         f"Активний: 10:00-01:00 (Київ)"
