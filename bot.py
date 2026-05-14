@@ -214,8 +214,14 @@ def process_match(match, tournament_name):
     status = match.get("match_status", {})
     stage = status.get("stage", "")
 
-    # Тільки активні тайми
+    # Тільки активні матчі
     if stage not in ["1st Half", "2nd Half"]:
+        return
+
+    # Перевіряємо що матч дійсно в процесі
+    is_finished = status.get("is_finished", False)
+    is_in_progress = status.get("is_in_progress", True)
+    if is_finished or not is_in_progress:
         return
 
     minute_raw = status.get("live_time", "0")
