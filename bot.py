@@ -9,7 +9,7 @@ RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 CHECK_INTERVAL = 180
 
 # ===== ТРИГЕРИ =====
-TRIGGER_GOALS = [4, 5, 6]
+TRIGGER_GOALS = [4, 5]
 TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
@@ -262,15 +262,12 @@ def process_match(match, tournament_name):
             ht_home, ht_away = get_match_details(match_id)
             ht_known = ht_home is not None
 
-        # Статистика, форма, H2H
-        xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
+        # Форма та H2H
         home_max = get_team_max_goals(home_id) if home_id else None
         away_max = get_team_max_goals(away_id) if away_id else None
         h2h_max, h2h_score = get_h2h_max(match_id)
 
-        icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
-
-        msg = f"{icon} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
+        msg = f"{"⚽" if threshold == 4 else "🔥"} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
         msg += f"🏆 {tournament_name}\n"
         msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
         msg += f"🕐 Хвилина: {actual_minute}'\n"
@@ -281,15 +278,6 @@ def process_match(match, tournament_name):
             msg += f"📊 1-й тайм: невідомо\n"
 
         msg += f"📈 Всього голів: {total_goals}\n"
-
-        if any(x is not None for x in [xg_h, sh_h, pos_h]):
-            msg += f"{'━'*10}\n"
-            if xg_h is not None:
-                msg += f"📐 xG: {xg_h} - {xg_a}\n"
-            if sh_h is not None:
-                msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
-            if pos_h is not None:
-                msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
 
         if home_max is not None or away_max is not None:
             msg += f"{'━'*10}\n📋 Форма (останні 5):\n"
