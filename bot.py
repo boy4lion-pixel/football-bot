@@ -9,29 +9,89 @@ RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 CHECK_INTERVAL = 180
 
 # ===== ТРИГЕРИ =====
-TRIGGER_GOALS = [4, 5]
+TRIGGER_GOALS = [4, 5, 6]
 TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
 ACTIVE_HOUR_START = 7
 ACTIVE_HOUR_END = 22
 
-# ===== БЛОКУЄМО ТІЛЬКИ ЦЕ =====
+# ===== БЛОКУЄМО =====
 BLOCKED_KEYWORDS = [
+    # Вікові категорії
     "u16", "u17", "u18", "u19", "u20", "u21", "u23",
     "youth", "junior", "juniors", "academy",
+
+    # Жіночі
     "women", "woman", "ladies", "female", "girls",
+
+    # Резерви
     "reserve", "reserves", "b team",
+
+    # Регіональні / низькі дивізіони — загальні
+    "regional", "regionalliga",
+    "amateur", "amateurs",
+    "division 3", "division 4", "division 5",
+    "3. liga", "4. liga", "5. liga",
+    "3rd division", "4th division", "5th division",
+    "iii liga", "iv liga",
+    "ii division", "iii division", "iv division",
+    "third division", "fourth division",
+
+    # Іспанія низькі
+    "segunda b", "tercera", "tercera rfef", "segunda rfef",
+
+    # Італія низькі
+    "serie c", "serie d", "primavera",
+
+    # Німеччина низькі
+    "oberliga", "verbandsliga",
+
+    # Фінляндія низькі
+    "kakkonen", "kolmonen", "ykkonen",
+
+    # Нідерланди низькі
+    "tweede divisie", "derde divisie",
+
+    # Чехія низькі
+    "chnl", "msfl", "moravskoslezska",
+
+    # Польща низькі
+    "iii liga", "iv liga",
+
+    # Скандинавія низькі
+    "nakotnes", "nakotnes liga",
+
+    # Балкани низькі
+    "druga liga",
+    "2. snl", "3. snl",
+    "prva liga - rs", "prva liga rs",
+
+    # Росія та окупована територія — повний блок
+    "russia", "russian", "fnl", "rpl",
+    "crimea", "krym",
+
+    # Африка — повний блок
+    "africa", "morocco", "maroc", "nigeria", "ghana",
+    "kenya", "tanzania", "ethiopia", "cameroon", "senegal",
+    "ivory coast", "algeria", "tunisia", "egypt", "libya",
+    "sudan", "uganda", "zambia", "zimbabwe", "mozambique",
+    "angola", "congo", "mali", "burkina", "togo", "benin",
+    "coupe du trone", "botola",
+
+    # Південна Америка низькі / непотрібні
+    "serie b", "serie c", "serie d",
+    "liga auf uruguaya", "torneo intermedio", "torneo apertura",
+    "torneo clausura", "primera nacional", "primera b",
+    "brasileiro", "brasileirao",
+    "uruguay", "ecuador", "peru", "bolivia",
+    "venezuela", "paraguay", "chile", "colombia",
+    "argentina", "brazil",
+
+    # Мікро-країни
+    "andorra", "gibraltar", "faroe", "san marino",
+    "liechtenstein",
 ]
-
-# ===== СТАН =====
-alerted = {}
-
-HEADERS = {
-    "x-rapidapi-key": RAPIDAPI_KEY,
-    "x-rapidapi-host": "flashscore4.p.rapidapi.com",
-    "Content-Type": "application/json"
-}
 
 
 def is_allowed_league(name):
@@ -49,6 +109,13 @@ def send_telegram(message):
             print(f"❌ Telegram: {r.text[:100]}")
     except Exception as e:
         print(f"❌ Telegram exception: {e}")
+
+
+HEADERS = {
+    "x-rapidapi-key": RAPIDAPI_KEY,
+    "x-rapidapi-host": "flashscore4.p.rapidapi.com",
+    "Content-Type": "application/json"
+}
 
 
 def api_get(url, params):
@@ -79,7 +146,6 @@ def get_live_matches():
 
 
 def get_match_details(match_id):
-    """Повертає деталі матчу включно з HT рахунком"""
     data = api_get(
         "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/details",
         {"match_id": match_id}
@@ -120,7 +186,6 @@ def get_stats(match_id):
 
 
 def get_team_max_goals(team_id):
-    """Максимальна кількість голів в одному матчі за останні 5"""
     data = api_get(
         "https://flashscore4.p.rapidapi.com/api/flashscore/v2/teams/results",
         {"team_id": team_id, "page": "1"}
@@ -130,7 +195,6 @@ def get_team_max_goals(team_id):
     try:
         max_g = 0
         count = 0
-        # Структура: список турнірів, кожен має matches
         blocks = data if isinstance(data, list) else []
         for block in blocks:
             if count >= 5:
@@ -151,7 +215,6 @@ def get_team_max_goals(team_id):
 
 
 def get_h2h_max(match_id):
-    """Максимальна кількість голів в H2H за останні 5 матчів"""
     data = api_get(
         "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/h2h",
         {"match_id": match_id}
@@ -162,7 +225,6 @@ def get_h2h_max(match_id):
         max_g = 0
         max_score = ""
         count = 0
-        # Структура: список турнірів, кожен має matches
         blocks = data if isinstance(data, list) else []
         for block in blocks:
             if count >= 5:
@@ -202,6 +264,10 @@ def check_matches(data):
     print(f"📊 {filtered} матчів (всього {total})")
 
 
+# ===== СТАН =====
+alerted = {}
+
+
 def process_match(match, tournament_name):
     match_id = match.get("match_id", "unknown")
     home_team = match.get("home_team", {})
@@ -214,14 +280,8 @@ def process_match(match, tournament_name):
     status = match.get("match_status", {})
     stage = status.get("stage", "")
 
-    # Тільки активні матчі
+    # Тільки активні тайми
     if stage not in ["1st Half", "2nd Half"]:
-        return
-
-    # Перевіряємо що матч дійсно в процесі
-    is_finished = status.get("is_finished", False)
-    is_in_progress = status.get("is_in_progress", True)
-    if is_finished or not is_in_progress:
         return
 
     minute_raw = status.get("live_time", "0")
@@ -233,6 +293,10 @@ def process_match(match, tournament_name):
     # Реальна хвилина матчу
     actual_minute = minute if stage == "1st Half" else 45 + minute
 
+    # ✅ ФІКС: пропускаємо хвилину 45 в першому таймі — це перерва/завершений матч
+    if stage == "1st Half" and actual_minute == 45:
+        return
+
     # Пропускаємо якщо хвилина 0 або перевищує ліміт
     if actual_minute < 1 or actual_minute > TRIGGER_MAX_MINUTE:
         return
@@ -242,7 +306,6 @@ def process_match(match, tournament_name):
     away_score = int(scores.get("away", 0) or 0)
     total_goals = home_score + away_score
 
-    # Перевіряємо кожен поріг
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
             break
@@ -262,12 +325,15 @@ def process_match(match, tournament_name):
             ht_home, ht_away = get_match_details(match_id)
             ht_known = ht_home is not None
 
-        # Форма та H2H
+        # Статистика, форма, H2H
+        xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
         home_max = get_team_max_goals(home_id) if home_id else None
         away_max = get_team_max_goals(away_id) if away_id else None
         h2h_max, h2h_score = get_h2h_max(match_id)
 
-        msg = f"{"⚽" if threshold == 4 else "🔥"} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
+        icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
+
+        msg = f"{icon} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
         msg += f"🏆 {tournament_name}\n"
         msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
         msg += f"🕐 Хвилина: {actual_minute}'\n"
@@ -278,6 +344,15 @@ def process_match(match, tournament_name):
             msg += f"📊 1-й тайм: невідомо\n"
 
         msg += f"📈 Всього голів: {total_goals}\n"
+
+        if any(x is not None for x in [xg_h, sh_h, pos_h]):
+            msg += f"{'━'*10}\n"
+            if xg_h is not None:
+                msg += f"📐 xG: {xg_h} - {xg_a}\n"
+            if sh_h is not None:
+                msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
+            if pos_h is not None:
+                msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
 
         if home_max is not None or away_max is not None:
             msg += f"{'━'*10}\n📋 Форма (останні 5):\n"
@@ -303,7 +378,7 @@ def main():
     send_telegram(
         f"🤖 <b>Football Alert Bot FINAL!</b>\n"
         f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
-        f"Всі ліги крім жіночих та юнацьких\n"
+        f"Всі ліги крім жіночих, юнацьких, регіональних, Африки, Пд.Америки\n"
         f"Активний: 10:00-01:00 (Київ)"
     )
 
