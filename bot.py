@@ -35,7 +35,7 @@ BLOCKED_KEYWORDS = [
     "3. liga", "4. liga", "5. liga",
     "3rd division", "4th division", "5th division",
     "iii liga", "iv liga",
-    "ii division", "iii division", "iv division",
+    "iii division", "iv division",
     "third division", "fourth division",
 
     # Іспанія низькі
@@ -68,8 +68,9 @@ BLOCKED_KEYWORDS = [
     "prva liga - rs", "prva liga rs",
 
     # Росія та окупована територія — повний блок
-    "russia", "russian", "fnl", "rpl",
+    "russia", "russian", "rpl",
     "crimea", "krym",
+    "fnl 2", "fnl2",
 
     # Африка — повний блок
     "africa", "morocco", "maroc", "nigeria", "ghana",
@@ -323,46 +324,15 @@ def process_match(match, tournament_name):
             ht_known = True
         else:
             ht_home, ht_away = get_match_details(match_id)
-            ht_known = ht_home is not None
+            ht_known = ht_home is not None        icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
 
-        # Статистика, форма, H2H
-        xg_h, xg_a, sh_h, sh_a, pos_h, pos_a = get_stats(match_id)
-        home_max = get_team_max_goals(home_id) if home_id else None
-        away_max = get_team_max_goals(away_id) if away_id else None
-        h2h_max, h2h_score = get_h2h_max(match_id)
-
-        icon = "⚽" if threshold == 4 else ("🔥" if threshold == 5 else "💥")
-
-        msg = f"{icon} <b>АЛЕРТ! {threshold} ГОЛИ!</b>\n"
+        msg = f"{icon} <b>АЛЕРТ! {threshold}+ ГОЛІВ</b>\n"
         msg += f"🏆 {tournament_name}\n"
         msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
         msg += f"🕐 Хвилина: {actual_minute}'\n"
 
         if ht_known:
-            msg += f"📊 1-й тайм: {ht_home}-{ht_away} ({ht_home+ht_away} голів)\n"
-        else:
-            msg += f"📊 1-й тайм: невідомо\n"
-
-        msg += f"📈 Всього голів: {total_goals}\n"
-
-        if any(x is not None for x in [xg_h, sh_h, pos_h]):
-            msg += f"{'━'*10}\n"
-            if xg_h is not None:
-                msg += f"📐 xG: {xg_h} - {xg_a}\n"
-            if sh_h is not None:
-                msg += f"⚽ Удари: {sh_h} - {sh_a}\n"
-            if pos_h is not None:
-                msg += f"🎯 Володіння: {pos_h}% - {pos_a}%\n"
-
-        if home_max is not None or away_max is not None:
-            msg += f"{'━'*10}\n📋 Форма (останні 5):\n"
-            if home_max is not None:
-                msg += f"  {home}: макс {home_max} голів\n"
-            if away_max is not None:
-                msg += f"  {away}: макс {away_max} голів\n"
-
-        if h2h_max is not None:
-            msg += f"🤝 H2H макс: {h2h_max} голів ({h2h_score})\n"
+            msg += f"📊 1-й тайм: {ht_home}-{ht_away}\n"
 
         msg += f"✅ Тригер спрацював!"
 
