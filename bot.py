@@ -9,7 +9,7 @@ RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 CHECK_INTERVAL = 180
 
 # ===== ТРИГЕРИ =====
-TRIGGER_GOALS = [4, 5, 6]
+TRIGGER_GOALS = [4]
 TRIGGER_MAX_MINUTE = 75
 
 # ===== АКТИВНИЙ ЧАС (UTC) =====
@@ -293,8 +293,8 @@ def process_match(match, tournament_name):
     # Реальна хвилина матчу
     actual_minute = minute if stage == "1st Half" else 45 + minute
 
-    # ✅ ФІКС: пропускаємо хвилину 45 в першому таймі — це перерва/завершений матч
-    if stage == "1st Half" and actual_minute == 45:
+    # ✅ ФІКС: пропускаємо хвилини 45 і 90 — кінець таймів / завершені матчі
+    if actual_minute in [45, 90]:
         return
 
     # Пропускаємо якщо хвилина 0 або перевищує ліміт
@@ -377,7 +377,7 @@ def main():
 
     send_telegram(
         f"🤖 <b>Football Alert Bot FINAL!</b>\n"
-        f"Алерти: {', '.join(str(g)+'+' for g in TRIGGER_GOALS)} голів до {TRIGGER_MAX_MINUTE}'\n"
+        f"Алерти: 4+ голів до {TRIGGER_MAX_MINUTE}'\n"
         f"Всі ліги крім жіночих, юнацьких, регіональних, Африки, Пд.Америки\n"
         f"Активний: 10:00-01:00 (Київ)"
     )
