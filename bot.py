@@ -8,16 +8,12 @@ CHAT_ID = "439583139"
 RAPIDAPI_KEY = "b4bd4a4ab1msh31fe8f92668fd14p1b8e80jsnfa2ae02b25cf"
 
 CHECK_INTERVAL = 180
-
-# ===== ТРИГЕРИ =====
 TRIGGER_GOALS = [5]
 TRIGGER_MAX_MINUTE = 80
 
-# ===== АКТИВНИЙ ЧАС (UTC) =====
 ACTIVE_HOUR_START = 7
 ACTIVE_HOUR_END = 22
 
-# ===== БЛОКУЄМО =====
 BLOCKED_KEYWORDS = [
     "u16", "u17", "u18", "u19", "u20", "u21", "u23",
     "youth", "junior", "juniors", "academy",
@@ -25,7 +21,6 @@ BLOCKED_KEYWORDS = [
     "reserve", "reserves", "b team",
 ]
 
-# ===== СТАН =====
 alerted = {}
 
 HEADERS = {
@@ -45,29 +40,18 @@ def is_allowed_league(name):
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        r = requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=10)
-        if r.status_code == 200:
-            print("✅ Telegram надіслано")
-        else:
-            print(f"❌ Telegram: {r.status_code}")
+        r = requests.post(url, data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
+        print("✅ Telegram надіслано" if r.status_code == 200 else f"❌ Telegram: {r.status_code}")
     except Exception as e:
-        print(f"❌ Telegram exception: {e}")
+        print(f"❌ Telegram error: {e}")
 
 
 def api_get(url, params=None):
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=12)
-        if r.status_code == 200:
-            return r.json()
-        else:
-            print(f"❌ API {r.status_code}")
-            return None
+        return r.json() if r.status_code == 200 else None
     except Exception as e:
-        print(f"❌ API exception: {e}")
+        print(f"❌ API error: {e}")
         return None
 
 
@@ -90,79 +74,29 @@ def get_live_matches():
         return None
 
 
-def get_match_details(match_id):
-    data = api_get(
-        "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/details",
-        {"match_id": match_id}
-    )
-    if not data:
-        return None, None
-    try:
-        scores = data.get("scores", {})
-        ht_home = scores.get("home_1st_half") or scores.get("ht_home")
-        ht_away = scores.get("away_1st_half") or scores.get("ht_away")
-        if ht_home is not None and ht_away is not None:
-            return int(ht_home), int(ht_away)
-    except:
-        pass
-    return None, None
+def is_match_finished(status):
+    """Посилена перевірка на завершений матч"""
+    if not status:
+        return False
+    
+    stage = str(status.get("stage", "")).lower()
+    status_type = str(status.get("type", "")).lower()
+    status_code = status.get("code")
+    minute_raw = str(status.get("live_time", ""))
 
-
-def get_team_max_goals(team_id):
-    if not team_id:
-        return None
-    data = api_get(
-        "https://flashscore4.p.rapidapi.com/api/flashscore/v2/teams/results",
-        {"team_id": team_id, "page": "1"}
-    )
-    if not data:
-        return None
-    try:
-        max_g = 0
-        count = 0
-        blocks = data if isinstance(data, list) else [data]
-        for block in blocks:
-            matches = block.get("matches", []) if isinstance(block, dict) else []
-            for m in matches:
-                if count >= 5:
-                    break
-                s = m.get("scores", {})
-                total = int(s.get("home", 0) or 0) + int(s.get("away", 0) or 0)
-                if total > max_g:
-                    max_g = total
-                count += 1
-        return max_g if count > 0 else None
-    except:
-        return None
-
-
-def get_h2h_max(match_id):
-    data = api_get(
-        "https://flashscore4.p.rapidapi.com/api/flashscore/v2/matches/h2h",
-        {"match_id": match_id}
-    )
-    if not data:
-        return None, None
-    try:
-        max_g = 0
-        max_score = ""
-        count = 0
-        blocks = data if isinstance(data, list) else [data]
-        for block in blocks:
-            matches = block.get("matches", []) if isinstance(block, dict) else []
-            for m in matches:
-                if count >= 5:
-                    break
-                s = m.get("scores", {})
-                h = int(s.get("home", 0) or 0)
-                a = int(s.get("away", 0) or 0)
-                if h + a > max_g:
-                    max_g = h + a
-                    max_score = f"{h}-{a}"
-                count += 1
-        return (max_g, max_score) if max_g > 0 else (None, None)
-    except:
-        return None, None
+    finished_keywords = ["finish", "ft", "end", "penalties", "after", "completed", "final"]
+    
+    if any(kw in status_type for kw in finished_keywords):
+        return True
+    if status_code in [100, 200, 300]:  # типові коди завершених
+        return True
+    if "finished" in stage or "ft" in stage:
+        return True
+    if minute_raw and ("90" in minute_raw or "120" in minute_raw):
+        # Якщо вже 90+ хвилин — майже завжди завершений
+        return True
+    
+    return False
 
 
 def process_match(match, tournament_name):
@@ -178,14 +112,12 @@ def process_match(match, tournament_name):
     away_id = away_team.get("team_id") or away_team.get("id")
 
     status = match.get("match_status", {})
-    stage = status.get("stage", "")
-    status_type = str(status.get("type", "")).lower()
-    status_code = status.get("code")
 
-    # === ФІЛЬТР ЗАВЕРШЕНИХ МАТЧІВ ===
-    if any(word in status_type for word in ["finish", "ft", "end", "penalties", "after"]) or status_code in [100, 200]:
+    # === ПОСИЛЕНА ФІЛЬТРАЦІЯ ===
+    if is_match_finished(status):
         return
 
+    stage = status.get("stage", "")
     if stage not in ["1st Half", "2nd Half"]:
         return
 
@@ -207,7 +139,7 @@ def process_match(match, tournament_name):
 
     # Дебаг
     if total_goals >= 4:
-        print(f"🔎 {home} vs {away} | {home_score}-{away_score} | {actual_minute}' | Stage: {stage}")
+        print(f"🔎 {home} vs {away} | {home_score}-{away_score} | {actual_minute}' | Stage: {stage} | Status: {status.get('type')}")
 
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
@@ -220,45 +152,28 @@ def process_match(match, tournament_name):
 
         alerted[match_id].add(threshold)
 
-        # HT score
+        # HT
         if stage == "1st Half":
             ht_home, ht_away = home_score, away_score
             ht_known = True
         else:
-            ht_home, ht_away = get_match_details(match_id)
+            ht_home, ht_away = get_match_details(match_id) if 'get_match_details' in globals() else (None, None)
             ht_known = ht_home is not None
-
-        home_max = get_team_max_goals(home_id)
-        away_max = get_team_max_goals(away_id)
-        h2h_max, h2h_score = get_h2h_max(match_id)
 
         msg = f"🔥 <b>АЛЕРТ! {threshold}+ ГОЛІВ!</b>\n"
         msg += f"🏆 {tournament_name}\n"
         msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
         msg += f"🕐 Хвилина: {actual_minute}'\n"
-
         if ht_known:
             msg += f"📊 1-й тайм: {ht_home}-{ht_away}\n"
+        msg += f"✅ Live алерт!"
 
-        if home_max or away_max:
-            msg += f"{'━'*10}\n📋 Форма (останні 5 матчів):\n"
-            if home_max:
-                msg += f"• {home}: макс {home_max} голів\n"
-            if away_max:
-                msg += f"• {away}: макс {away_max} голів\n"
-
-        if h2h_max:
-            msg += f"🤝 H2H максимум: {h2h_max} голів ({h2h_score})\n"
-
-        msg += f"✅ Тригер спрацював!"
-
-        print(f"\n🚨 АЛЕРТ {threshold}+ голів: {home} vs {away} ({actual_minute}')\n")
+        print(f"\n🚨 АЛЕРТ {threshold}+: {home} vs {away} ({actual_minute}')\n")
         send_telegram(msg)
 
 
 def check_matches(data):
     if not data:
-        print("⚠️ Дані порожні")
         return
 
     total = filtered = 0
@@ -277,31 +192,26 @@ def check_matches(data):
             try:
                 process_match(match, name)
             except Exception as e:
-                print(f"⚠️ Помилка в process_match: {e}")
+                print(f"⚠️ Error: {e}")
 
     print(f"📊 Перевірено: {filtered} матчів (всього {total})")
 
 
 def main():
-    print("🤖 Football Alert Bot v16 (оновлений) запущено!")
-    print(f"Тригер: {TRIGGER_GOALS[0]}+ голів до {TRIGGER_MAX_MINUTE}' хвилини")
+    print("🤖 Football Alert Bot v17 (посилена фільтрація) запущено!")
 
-    send_telegram(
-        f"🤖 <b>Football Alert Bot v16 запущено!</b>\n"
-        f"Алерт: {TRIGGER_GOALS[0]}+ голів до {TRIGGER_MAX_MINUTE}'\n"
-        f"Тільки live матчі"
-    )
+    send_telegram("🤖 <b>Bot v17 запущено</b>\nПосилена фільтрація завершених матчів")
 
     while True:
         now = datetime.now()
         if ACTIVE_HOUR_START <= now.hour < ACTIVE_HOUR_END:
-            print(f"\n⏰ [{now.strftime('%H:%M:%S')}] Перевіряю live матчі...")
+            print(f"\n⏰ [{now.strftime('%H:%M:%S')}] Перевіряю live...")
             data = get_live_matches()
             check_matches(data)
-            print(f"💤 Чекаю {CHECK_INTERVAL} секунд...")
+            print(f"💤 Чекаю {CHECK_INTERVAL} сек...")
             time.sleep(CHECK_INTERVAL)
         else:
-            print(f"😴 [{now.strftime('%H:%M')}] Спимо...")
+            print(f"😴 Спимо...")
             time.sleep(600)
 
 
