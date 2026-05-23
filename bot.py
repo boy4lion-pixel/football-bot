@@ -33,8 +33,7 @@ HEADERS = {
 def is_allowed_league(name):
     if not name:
         return True
-    n = name.lower()
-    return not any(kw in n for kw in BLOCKED_KEYWORDS)
+    return not any(kw in name.lower() for kw in BLOCKED_KEYWORDS)
 
 
 def send_telegram(message):
@@ -74,29 +73,29 @@ def get_live_matches():
         return None
 
 
-def is_match_finished(status):
-    """Посилена перевірка на завершений матч"""
+def is_match_live(status):
+    """Жорстка перевірка — чи матч ще точно живий"""
     if not status:
         return False
     
     stage = str(status.get("stage", "")).lower()
     status_type = str(status.get("type", "")).lower()
-    status_code = status.get("code")
-    minute_raw = str(status.get("live_time", ""))
+    minute_raw = str(status.get("live_time", "0"))
 
-    finished_keywords = ["finish", "ft", "end", "penalties", "after", "completed", "final"]
+    # Якщо статус явно finished
+    if any(x in status_type for x in ["finish", "ft", "end", "penalt", "after"]):
+        return False
     
-    if any(kw in status_type for kw in finished_keywords):
-        return True
-    if status_code in [100, 200, 300]:  # типові коди завершених
-        return True
-    if "finished" in stage or "ft" in stage:
-        return True
-    if minute_raw and ("90" in minute_raw or "120" in minute_raw):
-        # Якщо вже 90+ хвилин — майже завжди завершений
-        return True
-    
-    return False
+    # Якщо хвилина 80+ і великий рахунок — вважаємо finished
+    try:
+        minute = int(minute_raw.replace("+", "").split("+")[0])
+        if minute >= 80 and (status.get("stage") == "2nd Half"):
+            return False
+    except:
+        pass
+
+    # Якщо матч у 2nd Half і рахунок вже 6+ — теж часто finished
+    return True
 
 
 def process_match(match, tournament_name):
@@ -108,13 +107,11 @@ def process_match(match, tournament_name):
     away_team = match.get("away_team", {})
     home = home_team.get("name", "Господарі")
     away = away_team.get("name", "Гості")
-    home_id = home_team.get("team_id") or home_team.get("id")
-    away_id = away_team.get("team_id") or away_team.get("id")
 
     status = match.get("match_status", {})
 
-    # === ПОСИЛЕНА ФІЛЬТРАЦІЯ ===
-    if is_match_finished(status):
+    # === ФІЛЬТРАЦІЯ ===
+    if not is_match_live(status):
         return
 
     stage = status.get("stage", "")
@@ -139,7 +136,7 @@ def process_match(match, tournament_name):
 
     # Дебаг
     if total_goals >= 4:
-        print(f"🔎 {home} vs {away} | {home_score}-{away_score} | {actual_minute}' | Stage: {stage} | Status: {status.get('type')}")
+        print(f"🔎 {home} vs {away} | {home_score}-{away_score} | {actual_minute}' | Stage: {stage} | Type: {status.get('type')}")
 
     for threshold in TRIGGER_GOALS:
         if total_goals < threshold:
@@ -152,20 +149,10 @@ def process_match(match, tournament_name):
 
         alerted[match_id].add(threshold)
 
-        # HT
-        if stage == "1st Half":
-            ht_home, ht_away = home_score, away_score
-            ht_known = True
-        else:
-            ht_home, ht_away = get_match_details(match_id) if 'get_match_details' in globals() else (None, None)
-            ht_known = ht_home is not None
-
         msg = f"🔥 <b>АЛЕРТ! {threshold}+ ГОЛІВ!</b>\n"
         msg += f"🏆 {tournament_name}\n"
         msg += f"<b>{home} {home_score} - {away_score} {away}</b>\n"
         msg += f"🕐 Хвилина: {actual_minute}'\n"
-        if ht_known:
-            msg += f"📊 1-й тайм: {ht_home}-{ht_away}\n"
         msg += f"✅ Live алерт!"
 
         print(f"\n🚨 АЛЕРТ {threshold}+: {home} vs {away} ({actual_minute}')\n")
@@ -198,9 +185,9 @@ def check_matches(data):
 
 
 def main():
-    print("🤖 Football Alert Bot v17 (посилена фільтрація) запущено!")
+    print("🤖 Football Alert Bot v18 (жорстка фільтрація) запущено!")
 
-    send_telegram("🤖 <b>Bot v17 запущено</b>\nПосилена фільтрація завершених матчів")
+    send_telegram("🤖 <b>Bot v18 запущено</b>\nЖорстка фільтрація завершених матчів")
 
     while True:
         now = datetime.now()
